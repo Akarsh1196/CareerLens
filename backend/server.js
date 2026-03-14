@@ -18,10 +18,11 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABAS
 
 // Serve static frontend in production
 if (isProduction) {
-  const frontendPath = path.join(__dirname, '..', 'frontend', 'dist');
+  const frontendPath = path.join(__dirname, 'frontend', 'dist');
   app.use(express.static(frontendPath));
   
-  app.get('*', (req, res) => {
+  // Wildcard route must be at the end
+  app.use((req, res) => {
     res.sendFile(path.join(frontendPath, 'index.html'));
   });
 }
