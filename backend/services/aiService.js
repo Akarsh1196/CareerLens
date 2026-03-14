@@ -272,17 +272,4 @@ Return ONLY valid JSON matching the schema above. No markdown, no extra text, no
   return result;
 }
 
-  if (!result && geminiApiKey && geminiApiKey !== 'your_gemini_api_key_here' && geminiApiKey.startsWith('AIza')) {
-    console.log('[AI] Groq failed or not available, trying Gemini as fallback...');
-    result = await tryGemini(geminiApiKey, userPrompt);
-  }
-
-  if (!result) {
-    console.log('[AI] All AI providers failed. Using mock report.');
-    return generateMockReport(answers);
-  }
-
-  return result;
-}
-
 module.exports = { generateCareerReport };
