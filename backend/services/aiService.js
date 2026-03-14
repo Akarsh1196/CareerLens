@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq');
 
 const SYSTEM_PROMPT = `You are an expert career identity strategist. Your goal is to analyze a user's behavioral signals, raw answers, and keyword frequencies to generate a distinct "Career Identity" and personalized 12-month roadmap.
 
@@ -42,12 +43,21 @@ Required JSON Schema:
 
 IMPORTANT: top_matches must have exactly 4 items. strengths must have exactly 3 items. roadmap must have 4-6 items spanning 12 months. day_in_life must have 5-6 items. indian_examples must have 2-3 real Indian professionals.`;
 
-// Fallback mock report when AI API is unavailable
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-70b-versatile',
+  'llama-3.1-8b-instant',
+  'mixtral-8x7b-32768',
+  'gemma2-9b-it'
+];
+
+const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+
 function generateMockReport(answers) {
   const name = answers.name || 'User';
   const education = answers.education || 'General Studies';
 
-  console.log('[AI] Using MOCK report (Gemini quota exhausted)');
+  console.log('[AI] Using MOCK report (all AI providers failed)');
 
   return {
     career_identity: "The Strategic Builder",
@@ -120,22 +130,109 @@ function generateMockReport(answers) {
   };
 }
 
-async function generateCareerReport(answers, signals) {
-  const apiKey = process.env.GEMINI_API_KEY;
+function parseJsonResponse(text) {
+  let cleanJsonText = text.trim();
+  if (cleanJsonText.startsWith('```')) {
+    cleanJsonText = cleanJsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  }
+  return JSON.parse(cleanJsonText);
+}
 
-  console.log('[AI] Starting report generation...');
-  console.log('[AI] API Key present:', !!apiKey);
+async function tryGroq(groqClient, prompt) {
+  for (const modelName of GROQ_MODELS) {
+    try {
+      console.log(`[Groq] Trying model: ${modelName}...`);
+      
+      const completion = await groqClient.chat.completions.create({
+        model: modelName,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+        response_format: { type: 'json_object' }
+      });
 
-  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    console.log('[AI] No Gemini key configured, using mock report');
-    return generateMockReport(answers);
+      const reportText = completion.choices[0]?.message?.content;
+      if (!reportText) {
+        console.log(`[Groq] ${modelName} returned empty response`);
+        continue;
+      }
+
+      console.log('[Groq] Response received, length:', reportText.length);
+      const parsed = parseJsonResponse(reportText);
+      console.log('[Groq] SUCCESS! Career identity:', parsed.career_identity);
+      return parsed;
+    } catch (error) {
+      console.error(`[Groq] ${modelName} failed:`, error.message?.slice(0, 150));
+      
+      if (error.message?.includes('429') || error.message?.includes('rate_limit') || error.message?.includes('quota')) {
+        console.log(`[Groq] Rate limited on ${modelName}, trying next model...`);
+        continue;
+      }
+      if (error instanceof SyntaxError) {
+        console.error(`[Groq] Bad JSON from ${modelName}, trying next model...`);
+        continue;
+      }
+      continue;
+    }
+  }
+  return null;
+}
+
+async function tryGemini(apiKey, prompt) {
+  if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey.startsWith('AIzaSy')) {
+    console.log('[Gemini] No valid API key configured');
+    return null;
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
 
-  const userPrompt = `${SYSTEM_PROMPT}
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      console.log(`[Gemini] Trying model: ${modelName}...`);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const reportText = response.text().trim();
 
-Now analyze the following user data to generate their career report:
+      if (!reportText) {
+        console.log(`[Gemini] ${modelName} returned empty response`);
+        continue;
+      }
+
+      console.log('[Gemini] Response received, length:', reportText.length);
+      const parsed = parseJsonResponse(reportText);
+      console.log('[Gemini] SUCCESS! Career identity:', parsed.career_identity);
+      return parsed;
+    } catch (error) {
+      console.error(`[Gemini] ${modelName} failed:`, error.message?.slice(0, 150));
+
+      if (error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+        console.log(`[Gemini] Rate limited on ${modelName}, trying next model...`);
+        continue;
+      }
+      if (error instanceof SyntaxError) {
+        console.error(`[Gemini] Bad JSON from ${modelName}, trying next model...`);
+        continue;
+      }
+      continue;
+    }
+  }
+  return null;
+}
+
+async function generateCareerReport(answers, signals) {
+  console.log('[AI] Starting report generation...');
+
+  const groqApiKey = process.env.GROQ_API_KEY;
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+
+  console.log('[AI] Groq API Key present:', !!groqApiKey && groqApiKey !== 'your_groq_api_key_here');
+  console.log('[AI] Gemini API Key present:', !!geminiApiKey && geminiApiKey !== 'your_gemini_api_key_here');
+
+  const userPrompt = `Now analyze the following user data to generate their career report:
 
 Raw Answers:
 ${JSON.stringify(answers, null, 2)}
@@ -145,46 +242,26 @@ ${JSON.stringify(signals, null, 2)}
 
 Return ONLY valid JSON matching the schema above. No markdown, no extra text, no backticks.`;
 
-  // Try Gemini API with fallback to mock
-  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+  let result = null;
 
-  for (const modelName of models) {
-    try {
-      console.log(`[AI] Trying model: ${modelName}...`);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(userPrompt);
-      const response = await result.response;
-      const reportText = response.text().trim();
-
-      console.log('[AI] Response received, length:', reportText.length);
-
-      let cleanJsonText = reportText;
-      if (cleanJsonText.startsWith('```')) {
-        cleanJsonText = cleanJsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-      }
-
-      const parsed = JSON.parse(cleanJsonText);
-      console.log('[AI] SUCCESS! Career identity:', parsed.career_identity);
-      return parsed;
-    } catch (error) {
-      console.error(`[AI] ${modelName} failed:`, error.message?.slice(0, 150));
-
-      if (error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
-        console.log('[AI] Rate limited, trying next model...');
-        continue;
-      }
-      if (error instanceof SyntaxError) {
-        console.error('[AI] Bad JSON from AI, trying next model...');
-        continue;
-      }
-      // For other errors, also try next model
-      continue;
-    }
+  if (groqApiKey && groqApiKey !== 'your_groq_api_key_here' && !groqApiKey.startsWith('gsk_')) {
+    console.log('[AI] Invalid Groq API key format');
+  } else if (groqApiKey) {
+    const groqClient = new Groq({ apiKey: groqApiKey });
+    result = await tryGroq(groqClient, userPrompt);
   }
 
-  // All models failed — use mock
-  console.log('[AI] All Gemini models failed. Falling back to mock report.');
-  return generateMockReport(answers);
+  if (!result && geminiApiKey) {
+    console.log('[AI] Groq failed, trying Gemini as fallback...');
+    result = await tryGemini(geminiApiKey, userPrompt);
+  }
+
+  if (!result) {
+    console.log('[AI] All AI providers failed. Using mock report.');
+    return generateMockReport(answers);
+  }
+
+  return result;
 }
 
 module.exports = { generateCareerReport };
