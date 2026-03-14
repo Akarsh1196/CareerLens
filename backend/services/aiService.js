@@ -1,5 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const Groq = require('groq');
+const OpenAI = require('openai');
 
 const SYSTEM_PROMPT = `You are an expert career identity strategist. Your goal is to analyze a user's behavioral signals, raw answers, and keyword frequencies to generate a distinct "Career Identity" and personalized 12-month roadmap.
 
@@ -138,7 +138,12 @@ function parseJsonResponse(text) {
   return JSON.parse(cleanJsonText);
 }
 
-async function tryGroq(groqClient, prompt) {
+async function tryGroq(groqApiKey, prompt) {
+  const groqClient = new OpenAI({
+    apiKey: groqApiKey.trim(),
+    baseURL: 'https://api.groq.com/openai/v1'
+  });
+
   for (const modelName of GROQ_MODELS) {
     try {
       console.log(`[Groq] Trying model: ${modelName}...`);
@@ -182,7 +187,7 @@ async function tryGroq(groqClient, prompt) {
 }
 
 async function tryGemini(apiKey, prompt) {
-  if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey.startsWith('AIzaSy')) {
+  if (!apiKey || apiKey === 'your_gemini_api_key_here' || !apiKey.startsWith('AIza')) {
     console.log('[Gemini] No valid API key configured');
     return null;
   }
@@ -244,15 +249,15 @@ Return ONLY valid JSON matching the schema above. No markdown, no extra text, no
 
   let result = null;
 
-  if (groqApiKey && groqApiKey !== 'your_groq_api_key_here' && !groqApiKey.startsWith('gsk_')) {
-    console.log('[AI] Invalid Groq API key format');
-  } else if (groqApiKey) {
-    const groqClient = new Groq({ apiKey: groqApiKey });
-    result = await tryGroq(groqClient, userPrompt);
+  if (groqApiKey && groqApiKey !== 'your_groq_api_key_here' && groqApiKey.startsWith('gsk_')) {
+    console.log('[AI] Valid Groq API key format, calling Groq...');
+    result = await tryGroq(groqApiKey, userPrompt);
+  } else {
+    console.log('[AI] No valid Groq API key, skipping Groq');
   }
 
-  if (!result && geminiApiKey) {
-    console.log('[AI] Groq failed, trying Gemini as fallback...');
+  if (!result && geminiApiKey && geminiApiKey !== 'your_gemini_api_key_here' && geminiApiKey.startsWith('AIza')) {
+    console.log('[AI] Groq failed or not available, trying Gemini as fallback...');
     result = await tryGemini(geminiApiKey, userPrompt);
   }
 
