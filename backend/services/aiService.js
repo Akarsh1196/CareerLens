@@ -229,13 +229,15 @@ async function tryGemini(apiKey, prompt) {
 }
 
 async function generateCareerReport(answers, signals) {
-  console.log('[AI] Starting report generation...');
+  console.log('\n[AI] ════════════════════════════════════════════════════════════');
+  console.log('[AI]           AI REPORT GENERATION STARTED                    ');
+  console.log('[AI] ════════════════════════════════════════════════════════════');
 
   const groqApiKey = process.env.GROQ_API_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
 
-  console.log('[AI] Groq API Key present:', !!groqApiKey && groqApiKey !== 'your_groq_api_key_here');
-  console.log('[AI] Gemini API Key present:', !!geminiApiKey && geminiApiKey !== 'your_gemini_api_key_here');
+  console.log('[AI] 📡 Groq API Key:', groqApiKey && groqApiKey.startsWith('gsk_') ? '✓ Configured' : '✗ Missing/Invalid');
+  console.log('[AI] 📡 Gemini API Key:', geminiApiKey && geminiApiKey.startsWith('AIza') ? '✓ Configured' : '✗ Missing/Invalid');
 
   const userPrompt = `Now analyze the following user data to generate their career report:
 
@@ -250,11 +252,25 @@ Return ONLY valid JSON matching the schema above. No markdown, no extra text, no
   let result = null;
 
   if (groqApiKey && groqApiKey !== 'your_groq_api_key_here' && groqApiKey.startsWith('gsk_')) {
-    console.log('[AI] Valid Groq API key format, calling Groq...');
+    console.log('[AI] 🔄 Trying Groq API (primary)...');
     result = await tryGroq(groqApiKey, userPrompt);
   } else {
-    console.log('[AI] No valid Groq API key, skipping Groq');
+    console.log('[AI] ⏭️  Skipping Groq (no valid API key)');
   }
+
+  if (!result && geminiApiKey && geminiApiKey !== 'your_gemini_api_key_here' && geminiApiKey.startsWith('AIza')) {
+    console.log('[AI] 🔄 Groq failed/unavailable, trying Gemini (fallback)...');
+    result = await tryGemini(geminiApiKey, userPrompt);
+  }
+
+  if (!result) {
+    console.log('[AI] ⚠️  All AI providers failed. Using mock report.');
+    return generateMockReport(answers);
+  }
+
+  console.log('[AI] ✓ AI Report generated successfully!');
+  return result;
+}
 
   if (!result && geminiApiKey && geminiApiKey !== 'your_gemini_api_key_here' && geminiApiKey.startsWith('AIza')) {
     console.log('[AI] Groq failed or not available, trying Gemini as fallback...');

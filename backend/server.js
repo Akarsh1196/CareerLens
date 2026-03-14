@@ -14,63 +14,87 @@ const PORT = process.env.PORT || 3001;
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 
-console.log('[BOOT] Supabase URL:', supabaseUrl ? supabaseUrl.slice(0, 30) + '...' : 'MISSING');
-console.log('[BOOT] Supabase Key Type:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SERVICE_ROLE (secure)' : 'ANON (RLS applies)');
+console.log('\n╔════════════════════════════════════════════════════════════╗');
+console.log('║           CareerLens Backend - Starting Up               ║');
+console.log('╚════════════════════════════════════════════════════════════╝');
+console.log('[CONFIG] Port:', PORT);
+console.log('[CONFIG] Supabase URL:', supabaseUrl ? supabaseUrl.slice(0, 30) + '...' : 'MISSING');
+console.log('[CONFIG] Supabase Key Type:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SERVICE_ROLE (secure)' : 'ANON (RLS applies)');
+console.log('[CONFIG] Groq API Key:', process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.startsWith('gsk_') ? '✓ Configured' : 'MISSING');
+console.log('[CONFIG] Gemini API Key:', process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIza') ? '✓ Configured' : 'MISSING');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[REQUEST] ${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
+  });
+  next();
+});
+
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'CareerLens API is running', port: PORT });
+  console.log('[HEALTH] Health check requested');
+  res.json({ 
+    status: 'ok', 
+    message: 'CareerLens API is running', 
+    port: PORT,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Diagnostic: test DB connection
 app.get('/api/db-test', async (req, res) => {
+  console.log('[DB-TEST] Testing database connection...');
   try {
     const { data, error } = await supabase.from('users').select('count').limit(1);
     if (error) throw error;
-    res.json({ status: 'DB connected', data });
+    console.log('[DB-TEST] ✓ Database connection successful! Users count:', data[0]?.count);
+    res.json({ status: 'DB connected', userCount: data[0]?.count, timestamp: new Date().toISOString() });
   } catch (err) {
-    console.error('[DB-TEST] Error:', err);
+    console.error('[DB-TEST] ✗ Database connection failed:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 // Save onboarding responses and generate report
 app.post('/api/onboarding', async (req, res) => {
-  console.log('\n==== /api/onboarding called ====');
+  console.log('\n╔════════════════════════════════════════════════════════════╗');
+  console.log('║  [ONBOARDING] New submission received                      ║');
+  console.log('╚════════════════════════════════════════════════════════════╝');
   try {
     const { userId, email, answers } = req.body;
 
-    console.log('[STEP 0] userId:', userId);
-    console.log('[STEP 0] email:', email);
-    console.log('[STEP 0] answers keys:', Object.keys(answers || {}));
+    console.log('[ONBOARDING] 📋 User ID:', userId);
+    console.log('[ONBOARDING] 📧 Email:', email || 'not provided');
+    console.log('[ONBOARDING] 📝 Total answers:', Object.keys(answers || {}).length);
 
     if (!userId || !answers) {
-      console.error('[STEP 0] MISSING userId or answers');
+      console.error('[ONBOARDING] ✗ Missing userId or answers');
       return res.status(400).json({ error: 'Missing userId or answers payload' });
     }
 
     // Step 1: Upsert user record to avoid FK constraint
-    console.log('[STEP 1] Upserting user to public.users...');
+    console.log('[ONBOARDING] 👤 [STEP 1/6] Upserting user to database...');
     const { error: userError } = await supabase
       .from('users')
       .upsert({ id: userId, email: email || '' }, { onConflict: 'id' });
 
     if (userError) {
-      console.error('[STEP 1] User upsert error:', userError);
-      // Don't throw — continue, user might already exist
+      console.error('[ONBOARDING] ✗ User upsert failed:', userError.message);
     } else {
-      console.log('[STEP 1] User upserted OK');
+      console.log('[ONBOARDING] ✓ [STEP 1/6] User saved successfully');
     }
 
     // Step 2: Flatten answers — handle rating_grid keys
-    // Onboarding sends keys like "skill_rating_Communication", we clean them to just "Communication"
     const cleanedAnswers = {};
     for (const [key, value] of Object.entries(answers)) {
       const cleanKey = key.startsWith('skill_rating_') ? key.replace('skill_rating_', '') : key;
       cleanedAnswers[cleanKey] = value?.toString() || '';
     }
-    console.log('[STEP 2] Cleaned answer keys:', Object.keys(cleanedAnswers));
+    console.log('[ONBOARDING] 🔧 [STEP 2/6] Processed', Object.keys(cleanedAnswers).length, 'answers');
 
     // Step 3: Insert answers into onboarding_answers table
     const insertData = Object.entries(cleanedAnswers).map(([key, value]) => ({
@@ -79,31 +103,31 @@ app.post('/api/onboarding', async (req, res) => {
       answer_text: value
     }));
 
-    console.log('[STEP 3] Inserting', insertData.length, 'answers...');
+    console.log('[ONBOARDING] 💾 [STEP 3/6] Saving answers to database...');
     const { error: insertError } = await supabase
       .from('onboarding_answers')
       .insert(insertData);
 
     if (insertError) {
-      console.error('[STEP 3] Insert answers error:', insertError);
+      console.error('[ONBOARDING] ✗ Failed to save answers:', insertError.message);
       throw insertError;
     }
-    console.log('[STEP 3] Answers saved OK');
+    console.log('[ONBOARDING] ✓ [STEP 3/6] Answers saved successfully');
 
     // Step 4: Extract signals from answers
-    console.log('[STEP 4] Extracting signals...');
+    console.log('[ONBOARDING] 🔍 [STEP 4/6] Extracting behavioral signals...');
     const { extractSignals } = require('./utils/signalExtractor');
     const signals = extractSignals(cleanedAnswers);
-    console.log('[STEP 4] Signals:', JSON.stringify(signals));
+    console.log('[ONBOARDING] 📊 Signals extracted:', JSON.stringify(signals));
 
     // Step 5: Generate AI report
-    console.log('[STEP 5] Calling OpenAI to generate report...');
+    console.log('[ONBOARDING] 🤖 [STEP 5/6] Generating AI career report...');
     const { generateCareerReport } = require('./services/aiService');
     const reportData = await generateCareerReport(cleanedAnswers, signals);
-    console.log('[STEP 5] AI report generated. Career identity:', reportData?.career_identity);
+    console.log('[ONBOARDING] ✓ [STEP 5/6] AI Report generated - Career Identity:', reportData?.career_identity);
 
     // Step 6: Save report to DB
-    console.log('[STEP 6] Saving report to career_reports...');
+    console.log('[ONBOARDING] 💾 [STEP 6/6] Saving report to database...');
     const { data: dbReport, error: reportError } = await supabase
       .from('career_reports')
       .insert({
@@ -124,14 +148,18 @@ app.post('/api/onboarding', async (req, res) => {
       .single();
 
     if (reportError) {
-      console.error('[STEP 6] Report save error:', reportError);
+      console.error('[ONBOARDING] ✗ Failed to save report:', reportError.message);
       throw reportError;
     }
-    console.log('[STEP 6] Report saved OK, id:', dbReport?.id);
+    console.log('[ONBOARDING] ✓ [STEP 6/6] Report saved successfully! ID:', dbReport?.id);
+
+    console.log('\n╔════════════════════════════════════════════════════════════╗');
+    console.log('║  ✓ ONBOARDING COMPLETED SUCCESSFULLY!                     ║');
+    console.log('╚════════════════════════════════════════════════════════════╝');
 
     res.json({ message: 'Success', report: dbReport });
   } catch (error) {
-    console.error('[/api/onboarding] FATAL ERROR:', error);
+    console.error('[ONBOARDING] ✗ FATAL ERROR:', error.message);
     res.status(500).json({ error: 'Failed to process onboarding data', details: error.message });
   }
 });
@@ -186,7 +214,14 @@ app.post('/api/checkin', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n[BOOT] CareerLens backend running on http://localhost:${PORT}`);
-  console.log('[BOOT] Health check: http://localhost:' + PORT + '/health');
-  console.log('[BOOT] DB test: http://localhost:' + PORT + '/api/db-test\n');
+  console.log('\n╔════════════════════════════════════════════════════════════╗');
+  console.log('║  ✓ CareerLens Backend Started Successfully!              ║');
+  console.log('╚════════════════════════════════════════════════════════════╝');
+  console.log(`[SERVER] Running on: http://localhost:${PORT}`);
+  console.log(`[SERVER] Health API: http://localhost:${PORT}/health`);
+  console.log(`[SERVER] DB Test API: http://localhost:${PORT}/api/db-test`);
+  console.log(`[SERVER] Onboarding API: http://localhost:${PORT}/api/onboarding`);
+  console.log(`[SERVER] Report API: http://localhost:${PORT}/api/report/:userId`);
+  console.log(`[SERVER] Checkin API: http://localhost:${PORT}/api/checkin`);
+  console.log('');
 });
