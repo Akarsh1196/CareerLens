@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { onboardingQuestions } from '../data/onboardingQuestions';
 import { useAuth } from '../context/AuthContext';
+import { API_ENDPOINTS } from '../lib/api';
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -22,7 +23,7 @@ export default function Onboarding() {
   const handleNext = async () => {
     if (isLastQuestion) {
       try {
-        const response = await fetch('http://localhost:3001/api/onboarding', {
+        const response = await fetch(API_ENDPOINTS.onboarding, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

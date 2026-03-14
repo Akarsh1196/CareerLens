@@ -7,6 +7,7 @@ import {
   Activity,
   ChevronRight
 } from 'lucide-react';
+import { API_ENDPOINTS } from '../lib/api';
 
 export default function Checkin() {
   const { user } = useAuth();
@@ -23,7 +24,7 @@ export default function Checkin() {
     setLoading(true);
     try {
       // In a real app we would send this to /api/checkin
-      const response = await fetch('http://localhost:3001/api/checkin', {
+      const response = await fetch(API_ENDPOINTS.checkin, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -10,6 +10,7 @@ import {
   Clock,
   ExternalLink
 } from 'lucide-react';
+import { API_ENDPOINTS } from '../lib/api';
 
 export default function CareerMatchDetail() {
   const { matchIndex } = useParams();
@@ -26,7 +27,7 @@ export default function CareerMatchDetail() {
 
   const fetchReport = async () => {
     try {
-      const res = await fetch(`http://localhost:3001/api/report/${user?.id}`);
+      const res = await fetch(API_ENDPOINTS.report(user?.id));
       if (res.ok) {
         const data = await res.json();
         setReport(data.report);
