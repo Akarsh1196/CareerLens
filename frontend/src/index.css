@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Roboto", "Outfit", sans-serif;
+  
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-bg-base: #fafafa;
+  --color-bg-surface: #ffffff;
+  --color-text-base: #171717;
+  --color-text-muted: #737373;
+  --color-border: #e5e5e5;
+  
+  --radius-xl: 1rem;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-base);
+  font-family: var(--font-sans);
+}
